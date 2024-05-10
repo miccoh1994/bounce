@@ -1,4 +1,4 @@
-# rbac
+# RABAC
 
 To install dependencies:
 
