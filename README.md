@@ -111,6 +111,80 @@ const bounce = await Bounce.create(
 
 You can implement the IBounceCache and IBouncePersistence interfaces and pass them to `Bounce.create(..., { cache: new CustomCache(), persistence: new CustomPersistence() })`
 
+# Recipes
+
+## Elysia Macros
+
+```typescript
+
+const currentUserPlugin = new Elysia({
+	name: 'current-user'
+})
+.derive(({cookie: { session }}) => ({ currentUser: session.value as User }))
+.macro(({onBeforeHandle) => {
+    return {
+        auth(_: true) {
+            onBeforeHandle(({currentUser, error}) => {
+		if (!currentUser) return error(401, {message: 'Unauthorized'})
+            })
+	}
+    }
+})
+
+
+const bouncePlugin = () => new Elysia({name: 'bounce'})
+.state('bounce', bounce)
+.use(currentUserPlugin()) 
+.macro(({onBeforeHandle}) => {
+   return {
+     permission(permission: BounceInstance['permissions'] | BounceInstance['permission'][]) {
+	onBeforeHandle(async ({ currentUser, store: {bounce}, error }) => {
+            const hasPermission = await bounce.can(currentUser.role, permission);
+            if (!hasPermission)
+              return error(403, 'Forbidden');
+	})
+     },
+     scoped({
+	idProvider: {
+           type: 'params' | 'body',
+           key: string,
+	},
+	getSubject: (id: string| number) => Promise,
+	getActors: (userId: string) => Promise<string[] | string>,
+	permission: BounceInstance['scopedPermissions']
+	}) {
+        onBeforeHandle(({ store: {bounce}, currentUser, error, params, body }) => {
+		const entity = permission.split(":")[2] as BounceInstance['entity'];
+		const id = idProvider.type === params ? params[idProvider.key] : body[idProvider.key];
+		const subject = getSubject({id});
+		const actor = getActors(currentUser.id);
+                const hasPermission = bounce.can(currentUser.role, {
+                     subject,
+                     actor
+		});
+		if (!hasPermission) return error(403, {message: 'Forbidden'});
+	}
+     }
+   }
+});
+
+const app = new Elysia()
+.use(currentUserPlugin())
+.use(bouncePlugin())
+.get('/posts', () => [], {
+    auth: true,
+    permission: 'read:posts'
+});
+.patch('/users/:id', () => [], {
+	auth: true,
+	scoped: { permission: 'edit:users:self', getActors: getUser, getSubject: getUser, idProvider: {
+		type: 'params',
+		key: 'id'
+	}}
+})
+
+```
+
 # Development
 
 Install dependencies:
